@@ -1,0 +1,65 @@
+{
+  "metadata": {
+    "generated_at": "2025-11-22T19:43:20.265384",
+    "system_version": "1.0.0",
+    "config_version": "1.0",
+    "date_range": {
+      "start": "2025-11-14T19:43:19.470739",
+      "end": "2025-11-22T19:43:19.964407"
+    },
+    "total_comments": 18,
+    "platforms": [
+      "instagram"
+    ],
+    "unique_posts": 2
+  },
+  "entities": {
+    "people": [
+      [
+        "Taylor Swift",
+        18,
+        true,
+        false
+      ]
+    ],
+    "shows": [],
+    "couples": [],
+    "storylines": [
+      {
+        "storyline": "relationship",
+        "mention_count": 6,
+        "percentage": 33.33333333333333
+      }
+    ]
+  },
+  "sentiment_summary": {
+    "Taylor Swift": {
+      "type": "person",
+      "total_mentions": 2,
+      "avg_sentiment": 1.0,
+      "emotion_breakdown": {
+        "excitement": 2
+      },
+      "intended_subject": true,
+      "organic_mentions": false
+    }
+  },
+  "velocity_alerts": [],
+  "demographics": {
+    "platform_distribution": {
+      "instagram": 18
+    },
+    "peak_hours": {
+      "19": 18
+    },
+    "high_engagement_sentiment": 0.5,
+    "low_engagement_sentiment": 0.667
+  },
+  "top_storylines": [
+    {
+      "storyline": "relationship",
+      "mention_count": 6,
+      "percentage": 33.33333333333333
+    }
+  ]
+}

@@ -38,6 +38,9 @@ Examples:
   # Process a CSV file
   python -m et_intel.cli.cli --import instagram_comments.csv --platform instagram --subject "Taylor Swift"
   
+  # Batch process all unprocessed CSVs in uploads folder
+  python -m et_intel.cli.cli --batch
+  
   # Generate intelligence brief
   python -m et_intel.cli.cli --generate --last-30-days
   
@@ -53,6 +56,8 @@ Examples:
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument('--import', dest='import_csv', metavar='CSV_FILE',
                            help='Import and process a CSV file')
+    mode_group.add_argument('--batch', action='store_true',
+                           help='Batch process all unprocessed CSVs in uploads folder')
     mode_group.add_argument('--generate', action='store_true',
                            help='Generate intelligence brief from processed data')
     mode_group.add_argument('--test', action='store_true',
@@ -65,9 +70,14 @@ Examples:
     # Import options
     import_group = parser.add_argument_group('import options')
     import_group.add_argument('--platform', choices=['instagram', 'youtube'],
-                            help='Platform (required for --import)')
+                            help='Platform (required for --import, optional for --batch)')
     import_group.add_argument('--subject', help='Main subject/topic of the post')
     import_group.add_argument('--url', help='Post or video URL')
+    
+    # Batch options
+    batch_group = parser.add_argument_group('batch options')
+    batch_group.add_argument('--no-auto-detect', action='store_true',
+                            help='Disable platform auto-detection for batch processing')
     
     # Generate options
     gen_group = parser.add_argument_group('generate options')
@@ -118,6 +128,25 @@ def main():
     # Initialize pipeline
     use_api = not args.no_api
     pipeline = ETIntelligencePipeline(use_api=use_api)
+    
+    if args.batch:
+        # Batch process all unprocessed CSVs
+        results = pipeline.batch_process_unprocessed(
+            platform=args.platform,
+            auto_detect_platform=not args.no_auto_detect
+        )
+        
+        if results['total_found'] > 0:
+            print(f"\nSummary:")
+            print(f"  Processed: {results['processed']}/{results['total_found']}")
+            print(f"  Failed: {results['failed']}/{results['total_found']}")
+            
+            if results['failed'] > 0:
+                print(f"\nFailed files:")
+                for result in results['results']:
+                    if result['status'] == 'failed':
+                        print(f"  - {result['filename']}: {result.get('error', 'Unknown error')}")
+        return
     
     if args.import_csv:
         if not args.platform:

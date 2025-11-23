@@ -1,0 +1,10 @@
+platform,username,comment_text,timestamp,likes,post_id,post_subject,post_url,comment_id,primary_emotion,sentiment_score,secondary_emotions,is_sarcastic,mentioned_entities
+instagram,@taylorswiftfan,OMG she ate this look 🔥,2025-11-22 19:43:21.746328,245,3bf20680042e,"Taylor Swift, Travis Kelce",,d7c198222e03c6a2,excitement,1.0,[],False,"{'people': [], 'shows': []}"
+instagram,@realitytv_lover,I'm so over this storyline honestly,2025-11-21 19:43:21.746349,12,3bf20680042e,"Taylor Swift, Travis Kelce",,b18a1e1ac77a6b75,neutral,0.0,[],False,"{'people': [], 'shows': []}"
+instagram,@moviebuff2024,They're perfect together!! ❤️,2025-11-20 19:43:21.746357,89,3bf20680042e,"Taylor Swift, Travis Kelce",,76206249f0b7c539,excitement,1.0,['love'],False,"{'people': [], 'shows': []}"
+instagram,@entertainment_news,Taylor Swift is iconic,2025-11-19 19:43:21.746362,156,3bf20680042e,"Taylor Swift, Travis Kelce",,d19d6b3afb35d78a,excitement,1.0,[],False,"{'people': ['Taylor Swift'], 'shows': []}"
+instagram,@celebrity_watcher,Travis Kelce is amazing,2025-11-18 19:43:21.746366,78,3bf20680042e,"Taylor Swift, Travis Kelce",,18ff70ed7f63fd23,excitement,1.0,[],False,"{'people': [], 'shows': []}"
+instagram,@popculture,Love this couple so much,2025-11-17 19:43:21.746370,203,3bf20680042e,"Taylor Swift, Travis Kelce",,ad64158bd2ec1684,excitement,1.0,['love'],False,"{'people': [], 'shows': []}"
+instagram,@swiftie4life,She is everything!,2025-11-16 19:43:21.746376,312,3bf20680042e,"Taylor Swift, Travis Kelce",,c83a5df9a0e672bd,neutral,0.0,[],False,"{'people': [], 'shows': []}"
+instagram,@travis_kelce_fan,Chiefs Kingdom!,2025-11-15 19:43:21.746381,45,3bf20680042e,"Taylor Swift, Travis Kelce",,dcc983b181eaeb04,excitement,1.0,[],False,"{'people': [], 'shows': []}"
+instagram,@nfl_fan,Best relationship ever,2025-11-14 19:43:21.746386,167,3bf20680042e,"Taylor Swift, Travis Kelce",,3bdeaa26709990b4,love,1.0,[],False,"{'people': [], 'shows': []}"

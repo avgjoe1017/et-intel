@@ -1,0 +1,49 @@
+# ET Social Intelligence System - Docker Compose
+# Easy deployment with all services configured
+
+version: '3.8'
+
+services:
+  et-intel:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: et-intel-app
+    volumes:
+      # Mount data directories (persist between container restarts)
+      - ./et_intel/data:/app/et_intel/data
+      - ./et_intel/reports:/app/et_intel/reports
+      - ./.env:/app/.env:ro  # Read-only mount for env vars
+      - ./et_intelligence.log:/app/et_intelligence.log
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    restart: unless-stopped
+    networks:
+      - et-intel-network
+    # Command can be overridden:
+    # docker-compose run et-intel python -m et_intel.cli.cli --batch
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: et-intel-dashboard
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./et_intel/data:/app/et_intel/data:ro  # Read-only for dashboard
+      - ./et_intel/reports:/app/et_intel/reports:ro
+    command: streamlit run streamlit_dashboard.py --server.port=8501 --server.address=0.0.0.0
+    environment:
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - et-intel
+    restart: unless-stopped
+    networks:
+      - et-intel-network
+
+networks:
+  et-intel-network:
+    driver: bridge
+

@@ -92,7 +92,7 @@ class IntelligenceBriefGenerator:
         # Build PDF
         doc.build(story)
         
-        print(f"\n✓ Intelligence Brief generated: {output_path}")
+        # Logging handled by pipeline
         return output_path
     
     def _create_title_page(self, data: dict) -> list:
@@ -195,8 +195,16 @@ class IntelligenceBriefGenerator:
         if sorted_entities:
             top_entity, top_data = sorted_entities[0]
             sentiment_label = self._sentiment_label(top_data['avg_sentiment'])
+            total = top_data.get('total_mentions', 0)
+            explicit = top_data.get('explicit_mentions', total)
+            implicit = top_data.get('implicit_mentions', 0)
+            
+            mention_breakdown = f"{total:,} total"
+            if implicit > 0:
+                mention_breakdown += f" ({explicit:,} explicit, {implicit:,} implicit)"
+            
             findings.append(
-                f"<b>{top_entity}</b> dominated conversation with {top_data['total_mentions']:,} mentions "
+                f"<b>{top_entity}</b> dominated conversation with {mention_breakdown} mentions "
                 f"({sentiment_label} sentiment, {top_data['avg_sentiment']:.2f})"
             )
         
@@ -298,21 +306,31 @@ class IntelligenceBriefGenerator:
             reverse=True
         )[:10]
         
-        table_data = [['Rank', 'Entity', 'Mentions', 'Avg Sentiment', 'Dominant Emotion']]
+        table_data = [['Rank', 'Entity', 'Mentions', 'Likes', 'Raw Sent', 'Weighted Sent', 'Delta']]
         
         for i, (entity, entity_data) in enumerate(sorted_entities, 1):
-            emotions = entity_data['emotion_breakdown']
-            dominant = max(emotions.items(), key=lambda x: x[1])[0] if emotions else 'N/A'
+            total = entity_data.get('total_mentions', 0)
+            total_likes = entity_data.get('total_likes', 0)
+            raw_sent = entity_data.get('avg_sentiment', 0)
+            weighted_sent = entity_data.get('weighted_avg_sentiment', raw_sent)
+            delta = weighted_sent - raw_sent
+            
+            # Color code delta (positive = agreement with sentiment, negative = disagreement)
+            delta_str = f"{delta:+.2f}"
+            if abs(delta) > 0.1:
+                delta_str = f"{delta:+.2f} ⚠" if delta < 0 else f"{delta:+.2f} ✓"
             
             table_data.append([
                 str(i),
-                entity[:30],
-                f"{entity_data['total_mentions']:,}",
-                f"{entity_data['avg_sentiment']:.2f}",
-                dominant.title()
+                entity[:20],
+                f"{total:,}",
+                f"{total_likes:,}",
+                f"{raw_sent:+.2f}",
+                f"{weighted_sent:+.2f}",
+                delta_str
             ])
         
-        t = Table(table_data, colWidths=[0.5*inch, 2*inch, 1*inch, 1*inch, 1.2*inch])
+        t = Table(table_data, colWidths=[0.5*inch, 1.5*inch, 0.8*inch, 0.8*inch, 0.8*inch, 0.9*inch, 0.7*inch])
         t.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a1a1a')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -325,6 +343,53 @@ class IntelligenceBriefGenerator:
         ]))
         
         story.append(t)
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Add detailed weighted sentiment analysis for top 3 entities
+        story.append(Paragraph("WEIGHTED SENTIMENT ANALYSIS (Like-Weighted)", styles['Heading2']))
+        story.append(Spacer(1, 0.1*inch))
+        story.append(Paragraph(
+            "Weighted sentiment accounts for comment likes (agreement). A comment with 1000 likes represents "
+            "1000+ people's opinions, not just one. This reveals what the community actually agrees with.",
+            styles['Normal']
+        ))
+        story.append(Spacer(1, 0.2*inch))
+        
+        for i, (entity, entity_data) in enumerate(sorted_entities[:3], 1):
+            raw_sent = entity_data.get('avg_sentiment', 0)
+            weighted_sent = entity_data.get('weighted_avg_sentiment', raw_sent)
+            total_likes = entity_data.get('total_likes', 0)
+            delta = weighted_sent - raw_sent
+            top_comment = entity_data.get('top_liked_comment')
+            
+            # Interpretation
+            if abs(delta) < 0.05:
+                interpretation = "Raw and weighted sentiment align - community agrees with average opinion"
+            elif delta > 0.1:
+                pct = int((weighted_sent/raw_sent - 1) * 100) if raw_sent != 0 else 0
+                interpretation = f"Positive comments getting {pct}% more agreement - positive sentiment is resonating"
+            elif delta < -0.1:
+                pct = int(abs((weighted_sent/raw_sent - 1) * 100)) if raw_sent != 0 else 0
+                interpretation = f"Negative comments getting {pct}% more agreement - negative sentiment is resonating"
+            else:
+                interpretation = "Moderate agreement difference"
+            
+            story.append(Paragraph(f"<b>{entity}</b>", styles['Heading3']))
+            story.append(Paragraph(
+                f"Raw sentiment: {raw_sent:+.2f} | Weighted sentiment: {weighted_sent:+.2f} | "
+                f"Delta: {delta:+.2f} | Total likes: {total_likes:,}",
+                styles['Normal']
+            ))
+            story.append(Paragraph(f"<i>{interpretation}</i>", styles['Normal']))
+            
+            if top_comment and top_comment.get('likes', 0) > 10:
+                story.append(Paragraph(
+                    f"Top liked comment ({top_comment['likes']} likes): \"{top_comment['text'][:150]}...\" "
+                    f"(sentiment: {top_comment['sentiment']:+.2f})",
+                    styles['Normal']
+                ))
+            
+            story.append(Spacer(1, 0.15*inch))
         
         return story
     

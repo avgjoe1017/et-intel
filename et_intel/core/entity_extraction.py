@@ -9,13 +9,21 @@ from collections import Counter, defaultdict
 from typing import List, Dict, Set, Tuple
 from .. import config
 import json
+from .logging_config import get_logger
+
+logger = get_logger(__name__)
 
 class EntityExtractor:
     """
     Extracts and tracks entities (people, shows, storylines) from comments
     """
     
-    def __init__(self):
+    def __init__(self, use_spacy: bool = True):
+        """
+        Args:
+            use_spacy: If True, uses spaCy NER for better entity detection
+        """
+        self.use_spacy = use_spacy
         self.seed_relationships = config.SEED_RELATIONSHIPS
         self.entity_cache = defaultdict(int)
         self.co_occurrence_matrix = defaultdict(lambda: defaultdict(int))
@@ -34,6 +42,11 @@ class EntityExtractor:
         
         # Load any previously saved entity knowledge
         self.known_entities = self._load_entity_database()
+        
+        # Initialize spaCy (lazy loading)
+        self.nlp = None
+        if self.use_spacy:
+            self._init_spacy()
     
     def extract_entities_from_comments(self, df: pd.DataFrame) -> Dict:
         """
@@ -54,20 +67,26 @@ class EntityExtractor:
         }
         
         # Extract from post subjects first (these are the "intended" subjects)
+        # These represent ALL comments on that post (implicit mentions)
         intended_subjects = self._extract_from_subjects(df)
         
-        # Extract from comment text (organic mentions)
+        # Extract from comment text (explicit mentions in comments)
         organic_entities = self._extract_from_text(df)
         
-        # Merge and deduplicate
+        # Count implicit mentions (comments on posts about entities)
+        implicit_counts = self._count_implicit_mentions(df, intended_subjects)
+        
+        # Merge and deduplicate (including implicit mentions)
         all_people = self._merge_entities(
             intended_subjects['people'],
-            organic_entities['people']
+            organic_entities['people'],
+            implicit_counts
         )
         
         all_shows = self._merge_entities(
             intended_subjects['shows'],
-            organic_entities['shows']
+            organic_entities['shows'],
+            implicit_counts
         )
         
         # Detect couples/relationships
@@ -142,11 +161,62 @@ class EntityExtractor:
         match = re.search(r'\b([A-Z][a-z]+ [A-Z][a-z]+)\b', text)
         return match.group(1) if match else None
     
+    def _init_spacy(self):
+        """Initialize spaCy NER model (lazy loading)"""
+        try:
+            import spacy
+            logger = __import__('logging').getLogger(__name__)
+            
+            # Try to load the large model, fallback to medium or small
+            try:
+                self.nlp = spacy.load("en_core_web_lg")
+                logger.info("✓ Loaded spaCy en_core_web_lg model")
+            except OSError:
+                try:
+                    self.nlp = spacy.load("en_core_web_md")
+                    logger.info("✓ Loaded spaCy en_core_web_md model")
+                except OSError:
+                    self.nlp = spacy.load("en_core_web_sm")
+                    logger.info("✓ Loaded spaCy en_core_web_sm model")
+        except Exception as e:
+            logger = __import__('logging').getLogger(__name__)
+            logger.warning(f"spaCy not available: {e}. Install with: python -m spacy download en_core_web_lg")
+            self.nlp = None
+            self.use_spacy = False
+    
     def _extract_people_from_text(self, text: str) -> List[str]:
         """Extract all person names from comment text"""
         people = []
         
-        # Match capitalized names (First Last)
+        # Validate input
+        if not text or not isinstance(text, str):
+            return people
+        
+        # Use spaCy NER if available (much more accurate)
+        if self.use_spacy and self.nlp:
+            try:
+                # Limit text length to avoid memory issues
+                text_limited = text[:1000] if len(text) > 1000 else text
+                doc = self.nlp(text_limited)
+                # Extract PERSON entities
+                spacy_people = [ent.text for ent in doc.ents if ent.label_ == "PERSON"]
+                people.extend(spacy_people)
+                
+                # Also extract from noun chunks that look like names
+                for chunk in doc.noun_chunks:
+                    try:
+                        if chunk.root.pos_ == "PROPN" and len(chunk.text.split()) >= 2:
+                            # Likely a person name (proper noun with 2+ words)
+                            if chunk.text not in spacy_people:
+                                people.append(chunk.text)
+                    except Exception as e:
+                        logger = __import__('logging').getLogger(__name__)
+                        logger.debug(f"Error processing noun chunk: {e}")
+            except Exception as e:
+                logger = __import__('logging').getLogger(__name__)
+                logger.debug(f"spaCy extraction error: {e}")
+        
+        # Fallback to regex patterns
         matches = re.findall(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b', text)
         people.extend(matches)
         
@@ -155,7 +225,14 @@ class EntityExtractor:
             if known.lower() in text.lower():
                 people.append(known)
         
-        return list(set(people))
+        # Clean and deduplicate
+        cleaned = []
+        for person in people:
+            person = person.strip()
+            if len(person) > 2 and person not in cleaned:
+                cleaned.append(person)
+        
+        return cleaned
     
     def _extract_shows_from_text(self, text: str) -> List[str]:
         """Extract show/movie names from text"""
@@ -255,24 +332,87 @@ class EntityExtractor:
         
         return sorted(storylines, key=lambda x: x['mention_count'], reverse=True)
     
-    def _merge_entities(self, intended: List, organic: List) -> List:
-        """Merge intended subjects with organic mentions, deduplicate"""
+    def _count_implicit_mentions(self, df: pd.DataFrame, intended_subjects: Dict) -> Dict:
+        """
+        Count implicit mentions - comments on posts about entities
+        These are comments that don't explicitly name the entity but are clearly about them
+        """
+        implicit_counts = {'people': {}, 'shows': {}}
+        
+        # For each post subject, count all comments on that post
+        for subject in df['post_subject'].dropna().unique():
+            if not subject:
+                continue
+            
+            # Get all comments on posts with this subject
+            post_comments = df[df['post_subject'] == subject]
+            comment_count = len(post_comments)
+            
+            # Extract entities from subject
+            # Check if subject contains person names
+            for person_tuple in intended_subjects.get('people', []):
+                if isinstance(person_tuple, (tuple, list)) and len(person_tuple) > 0:
+                    person = person_tuple[0]
+                    if person.lower() in subject.lower():
+                        if person not in implicit_counts['people']:
+                            implicit_counts['people'][person] = 0
+                        implicit_counts['people'][person] += comment_count
+            
+            # Check if subject contains show names
+            for show_tuple in intended_subjects.get('shows', []):
+                if isinstance(show_tuple, (tuple, list)) and len(show_tuple) > 0:
+                    show = show_tuple[0]
+                    if show.lower() in subject.lower():
+                        if show not in implicit_counts['shows']:
+                            implicit_counts['shows'][show] = 0
+                        implicit_counts['shows'][show] += comment_count
+        
+        return implicit_counts
+    
+    def _merge_entities(self, intended: List, organic: List, implicit_counts: Dict = None) -> List:
+        """Merge intended subjects with organic mentions, including implicit counts"""
         merged = {}
+        implicit_counts = implicit_counts or {'people': {}, 'shows': {}}
         
-        for entity, count, source in intended:
-            if entity not in merged:
-                merged[entity] = {'count': count, 'intended': True, 'organic': False}
+        # Start with intended subjects (these get implicit mention counts)
+        for entity_tuple in intended:
+            if isinstance(entity_tuple, (tuple, list)) and len(entity_tuple) >= 3:
+                entity = entity_tuple[0]
+                count = entity_tuple[1] if len(entity_tuple) > 1 else 0
+                
+                if entity not in merged:
+                    # Get implicit count (all comments on posts about this entity)
+                    implicit_count = implicit_counts.get('people', {}).get(entity, 0)
+                    if implicit_count == 0:
+                        implicit_count = implicit_counts.get('shows', {}).get(entity, 0)
+                    
+                    merged[entity] = {
+                        'count': count,  # Explicit mentions in subject
+                        'implicit_count': implicit_count,  # All comments on posts about this
+                        'intended': True, 
+                        'organic': False
+                    }
         
-        for entity, count, source in organic:
-            if entity in merged:
-                merged[entity]['count'] += count
-                merged[entity]['organic'] = True
-            else:
-                merged[entity] = {'count': count, 'intended': False, 'organic': True}
+        # Add organic mentions
+        for entity_tuple in organic:
+            if isinstance(entity_tuple, (tuple, list)) and len(entity_tuple) >= 2:
+                entity = entity_tuple[0]
+                count = entity_tuple[1] if len(entity_tuple) > 1 else 0
+                
+                if entity in merged:
+                    merged[entity]['count'] += count  # Add explicit mentions
+                    merged[entity]['organic'] = True
+                else:
+                    merged[entity] = {
+                        'count': count,
+                        'implicit_count': 0,
+                        'intended': False, 
+                        'organic': True
+                    }
         
-        # Convert to list format
+        # Convert to list format: (name, total_count, intended, organic, implicit_count)
         result = [
-            (name, data['count'], data['intended'], data['organic'])
+            (name, data['count'] + data['implicit_count'], data['intended'], data['organic'], data['implicit_count'])
             for name, data in merged.items()
         ]
         
@@ -302,19 +442,23 @@ class EntityExtractor:
         """Save discovered entities for future use"""
         db_path = config.DB_DIR / "known_entities.json"
         
-        # Update known entities
-        for person, _, _, _ in entities.get('people', []):
-            if person not in self.known_entities['people']:
-                self.known_entities['people'].append(person)
+        # Update known entities (handle both old and new tuple formats)
+        for entity_tuple in entities.get('people', []):
+            if isinstance(entity_tuple, (tuple, list)) and len(entity_tuple) > 0:
+                person = entity_tuple[0]
+                if person not in self.known_entities['people']:
+                    self.known_entities['people'].append(person)
         
-        for show, _, _, _ in entities.get('shows', []):
-            if show not in self.known_entities['shows']:
-                self.known_entities['shows'].append(show)
+        for entity_tuple in entities.get('shows', []):
+            if isinstance(entity_tuple, (tuple, list)) and len(entity_tuple) > 0:
+                show = entity_tuple[0]
+                if show not in self.known_entities['shows']:
+                    self.known_entities['shows'].append(show)
         
         with open(db_path, 'w') as f:
             json.dump(self.known_entities, f, indent=2)
         
-        print(f"✓ Updated entity database with {len(entities['people'])} people, {len(entities['shows'])} shows")
+        # Logging will be handled by caller if needed
 
 
 

@@ -1,0 +1,49 @@
+# Docker ignore file - exclude unnecessary files from build context
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Documentation (not needed in container)
+docs/
+*.md
+!README.md
+
+# Test files
+tests/
+*.test.py
+
+# Logs
+*.log
+
+# Environment files (will be mounted)
+.env
+.env.local
+
+# Data files (will be mounted as volumes)
+et_intel/data/
+et_intel/reports/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+

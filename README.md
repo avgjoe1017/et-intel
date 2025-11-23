@@ -52,11 +52,30 @@ pip install --break-system-packages -r requirements.txt
 
 ### 3. (Optional) Set OpenAI API Key
 For better sentiment accuracy using GPT-4o-mini:
+
+**Option 1: Using .env file (Recommended)**
+1. Copy `.env.example` to `.env`:
+   ```bash
+   cp .env.example .env
+   ```
+2. Edit `.env` and add your OpenAI API key:
+   ```
+   OPENAI_API_KEY=your-key-here
+   ```
+
+**Option 2: Environment Variable**
 ```bash
+# Windows PowerShell
+$env:OPENAI_API_KEY="your-key-here"
+
+# Windows CMD
+set OPENAI_API_KEY=your-key-here
+
+# Linux/Mac
 export OPENAI_API_KEY="your-key-here"
 ```
 
-**Note:** System works without API using rule-based analysis (free but less accurate).
+**Note:** System works without API using rule-based analysis (free but less accurate). The `.env` file is automatically loaded if it exists in the project root.
 
 ## Quick Start
 
@@ -280,6 +299,109 @@ For questions or issues:
 1. Check this README
 2. Review sample code in `pipeline.py`
 3. Run with `--debug` flag for detailed logs
+
+## Interactive Dashboard
+
+Launch the Streamlit dashboard for interactive data exploration:
+
+```bash
+# First, process some data
+python -m et_intel.cli.cli --batch
+
+# Then launch dashboard
+streamlit run streamlit_dashboard.py
+```
+
+The dashboard provides:
+- Real-time filtering by date, platform, entity
+- Interactive charts and visualizations
+- Self-service analytics for stakeholders
+- Relationship network graphs
+
+See `DASHBOARD_SETUP.md` for detailed setup instructions.
+
+## Docker Deployment
+
+For consistent, reproducible deployments across environments:
+
+### Quick Start
+
+```bash
+# Build Docker image (downloads spaCy models)
+docker-compose build
+
+# Process all unprocessed CSV files
+docker-compose run --rm et-intel python -m et_intel.cli.cli --batch
+
+# Start interactive dashboard
+docker-compose up dashboard
+# Access at: http://localhost:8501
+```
+
+### Benefits
+
+- **Reproducible**: Same environment every time
+- **Easy Setup**: No need to install Python, spaCy, etc. on host
+- **Isolated**: Dependencies don't conflict with system packages
+- **Production-Ready**: Includes all dependencies pre-configured
+
+See `MD_DOCS/DOCKER_SETUP.md` for complete Docker guide.
+
+## Database Migrations
+
+When updating the database schema (adding columns, indexes, etc.):
+
+### Running Migrations
+
+```bash
+# Apply all pending migrations
+alembic upgrade head
+
+# Check current version
+alembic current
+
+# Rollback one step (if needed)
+alembic downgrade -1
+```
+
+### Creating New Migrations
+
+```bash
+# Create new migration after schema change
+alembic revision -m "add_new_column"
+
+# Edit the generated file in migrations/versions/
+# Then test: alembic upgrade head
+```
+
+**Important:** Always test migrations on a backup first!
+
+See `MD_DOCS/DATABASE_MIGRATIONS.md` for complete migration guide.
+
+## Testing
+
+Run the complete test suite:
+
+```bash
+# Install pytest if needed
+pip install pytest
+
+# Run all tests
+python tests/run_all_tests.py
+
+# Or run with pytest directly
+pytest tests/ -v
+
+# Or run tests in Docker
+docker-compose run --rm et-intel pytest tests/ -v
+```
+
+Tests cover:
+- End-to-end pipeline (CSV → processing → report)
+- New features (Hugging Face, spaCy, SQLite, NetworkX)
+- Dashboard functionality
+- Batch processing
+- Error handling
 
 ## License
 

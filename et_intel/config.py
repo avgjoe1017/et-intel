@@ -4,6 +4,17 @@ ET Social Intelligence System - Configuration
 
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+# Look for .env in project root (parent of et_intel package)
+PROJECT_ROOT = Path(__file__).parent.parent
+ENV_FILE = PROJECT_ROOT / ".env"
+if ENV_FILE.exists():
+    load_dotenv(ENV_FILE)
+else:
+    # Also try loading from current directory (if running from project root)
+    load_dotenv()
 
 # System version
 SYSTEM_VERSION = "1.0.0"
@@ -24,7 +35,7 @@ DB_DIR = DATA_DIR / "database"
 for dir_path in [DATA_DIR, UPLOADS_DIR, PROCESSED_DIR, REPORTS_DIR, DB_DIR]:
     dir_path.mkdir(exist_ok=True, parents=True)
 
-# API Configuration (set these as environment variables or update directly)
+# API Configuration (loaded from .env file or environment variables)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")  # For sentiment analysis
 
 # Model settings (using cheaper models to stay under $100/month)
