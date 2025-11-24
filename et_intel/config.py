@@ -38,14 +38,43 @@ for dir_path in [DATA_DIR, UPLOADS_DIR, PROCESSED_DIR, REPORTS_DIR, DB_DIR]:
 # API Configuration (loaded from .env file or environment variables)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")  # For sentiment analysis
 
+# LLM Enhancement Settings
+USE_LLM_ENHANCEMENT = os.getenv("USE_LLM_ENHANCEMENT", "true").lower() == "true"  # Enable LLM enhancements (entity canonicalization, story extraction, recommendations)
+
 # Model settings (using cheaper models to stay under $100/month)
-SENTIMENT_MODEL = "gpt-4o-mini"  # Cheaper than GPT-4, good enough for sentiment
+SENTIMENT_MODEL = "gpt-4o-mini"  # Cheaper than GPT-4, good enough for sentiment (legacy, use SENTIMENT_MODEL_MAIN)
 ENTITY_MODEL = "gpt-4o-mini"
 MAX_TOKENS_SENTIMENT = 150
 MAX_TOKENS_ENTITY = 300
+MAX_TOKENS_STORY = 500  # For story extraction
+MAX_TOKENS_RECOMMENDATIONS = 400  # For recommendations
+
+# Primary sentiment models (hybrid mode)
+SENTIMENT_MODEL_MAIN = "gpt-4o-mini"     # High-accuracy, used on escalated comments
+SENTIMENT_MODEL_CHEAP = "gpt-5-nano"     # Fast/cheap, used on all comments first
+                                         # Pricing: $0.05/$0.40 per 1M tokens (input/output)
+
+# Hybrid mode toggle
+SENTIMENT_USE_HYBRID = os.getenv("SENTIMENT_USE_HYBRID", "true").lower() == "true"  # Enable hybrid sentiment analysis
+
+# Batch API settings (50% cheaper, asynchronous processing)
+SENTIMENT_USE_BATCH_API = os.getenv("SENTIMENT_USE_BATCH_API", "false").lower() == "true"  # Use OpenAI Batch API (async, 50% cheaper)
+SENTIMENT_BATCH_POLL_INTERVAL = 60  # Seconds between batch status checks
+SENTIMENT_BATCH_MAX_WAIT = 86400  # Max wait time in seconds (24 hours)
+
+# Hybrid escalation thresholds
+SENTIMENT_AMBIGUITY_BAND = 0.20         # |score| < 0.20 → "uncertain", escalate
+SENTIMENT_MIN_LIKES_FOR_ESCALATION = 10 # High-importance comments get escalated
+SENTIMENT_MAX_LENGTH_FOR_NANO_ONLY = 20 # Words; longer comments more likely escalated
+SENTIMENT_STAN_PHRASES = [
+    "she ate", "he ate", "they ate", "this is everything",
+    "we stan", "living for this", "iconic", "queen", "king",
+    "i can't even", "obsessed", "yass", "yasss", "here for it"
+]
+SENTIMENT_MAX_ESCALATION_FRACTION = 0.25  # Safety cap: max 25% of comments go to 4o-mini
 
 # Processing settings
-BATCH_SIZE = 50  # Process comments in batches to manage API costs
+BATCH_SIZE = 20  # Process comments in batches to manage API costs
 MIN_COMMENT_LENGTH = 1  # Keep even single emoji/character comments (emojis ARE sentiment!)
 MAX_COMMENTS_PER_POST = 500  # Cap to manage costs
 MAX_COMMENTS_PER_BRIEF = 10000  # Maximum comments to include in a single brief

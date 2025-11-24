@@ -50,6 +50,22 @@ class SentimentAnalyzer:
         self.textblob_available = False
         if self.use_textblob:
             self._init_textblob()
+        
+        # Initialize OpenAI client if API is enabled and key is available
+        self.openai_client = None
+        if self.use_api and config.OPENAI_API_KEY and config.OPENAI_API_KEY.strip() and config.OPENAI_API_KEY != "your-openai-api-key-here":
+            try:
+                from openai import OpenAI
+                import os
+                # Set as environment variable (OpenAI library prefers this)
+                api_key = config.OPENAI_API_KEY.strip()
+                os.environ['OPENAI_API_KEY'] = api_key
+                # Also initialize client with explicit key
+                self.openai_client = OpenAI(api_key=api_key)
+                logger.info("OpenAI client initialized successfully with API key")
+            except Exception as e:
+                logger.warning(f"Could not initialize OpenAI client: {e}")
+                self.openai_client = None
     
     def analyze_comments(self, df: pd.DataFrame, batch_size: int = None) -> pd.DataFrame:
         """
@@ -99,8 +115,14 @@ class SentimentAnalyzer:
                         logger.warning("OpenAI API key not found. Falling back to rule-based sentiment analysis.")
                         logger.info("To use OpenAI API, set OPENAI_API_KEY in .env file or use --no-api flag for free analysis.")
                         results = self._analyze_rule_based(df)
+                    elif config.SENTIMENT_USE_BATCH_API:
+                        # Batch API mode: 50% cheaper, asynchronous processing
+                        results = self._analyze_with_batch_api(df)
+                    elif config.SENTIMENT_USE_HYBRID:
+                        # Hybrid mode: nano first, escalate important comments to 4o-mini
+                        results = self._analyze_with_api_hybrid(df, batch_size)
                     else:
-                        # Use GPT-4o-mini for better accuracy
+                        # Standard mode: Use GPT-4o-mini for all comments
                         results = self._analyze_with_api(df, batch_size)
                 elif self.use_hf and self.hf_classifier:
                     # Use Hugging Face emotion classifier (free, accurate)
@@ -195,17 +217,27 @@ class SentimentAnalyzer:
             logger.info("To use OpenAI API: 1) Create .env file, 2) Add OPENAI_API_KEY=your-key, 3) Or use --no-api flag for free analysis.")
             return self._analyze_rule_based(df)
         
-        try:
-            from openai import OpenAI
-            # Strip whitespace from API key (in case .env file has trailing spaces)
-            api_key = config.OPENAI_API_KEY.strip() if config.OPENAI_API_KEY else ""
-            if not api_key:
-                logger.warning("OpenAI API key is empty. Falling back to rule-based analysis.")
-                return self._analyze_rule_based(df)
-            client = OpenAI(api_key=api_key)
-        except Exception as e:
-            logger.warning(f"API not available: {e}. Falling back to rule-based analysis")
+        # Get API key
+        import os
+        api_key = config.OPENAI_API_KEY.strip() if config.OPENAI_API_KEY else ""
+        if not api_key:
+            logger.warning("OpenAI API key is empty. Falling back to rule-based analysis.")
             return self._analyze_rule_based(df)
+        
+        # Set environment variable (OpenAI library checks this)
+        os.environ['OPENAI_API_KEY'] = api_key
+        
+        # Use pre-initialized client if available, otherwise create new one
+        if self.openai_client is not None:
+            client = self.openai_client
+        else:
+            try:
+                from openai import OpenAI
+                client = OpenAI(api_key=api_key)
+                logger.info("Created new OpenAI client for API analysis")
+            except Exception as e:
+                logger.warning(f"API not available: {e}. Falling back to rule-based analysis")
+                return self._analyze_rule_based(df)
         
         results = []
         max_retries = 3
@@ -246,6 +278,30 @@ Respond in JSON format:
             # Retry logic with exponential backoff
             for attempt in range(max_retries):
                 try:
+                    # Ensure API key is available
+                    import os
+                    api_key = config.OPENAI_API_KEY.strip() if config.OPENAI_API_KEY else ""
+                    if not api_key:
+                        logger.error("API key is missing. Cannot make API call.")
+                        break
+                    
+                    # Set environment variable (OpenAI library checks this)
+                    os.environ['OPENAI_API_KEY'] = api_key
+                    
+                    # Use existing client if available and valid, otherwise create new one
+                    if client is None or not hasattr(client, '_client'):
+                        from openai import OpenAI
+                        client = OpenAI(api_key=api_key)
+                        logger.debug(f"Created OpenAI client for batch {i+1}")
+                    else:
+                        # Ensure the existing client has the API key
+                        if hasattr(client, '_client') and hasattr(client._client, 'api_key'):
+                            if client._client.api_key != api_key:
+                                # Recreate if key changed
+                                from openai import OpenAI
+                                client = OpenAI(api_key=api_key)
+                                logger.debug(f"Recreated OpenAI client (key changed)")
+                    
                     response = client.chat.completions.create(
                         model=config.SENTIMENT_MODEL,
                         messages=[
@@ -254,7 +310,7 @@ Respond in JSON format:
                         ],
                         temperature=0.3,
                         max_tokens=config.MAX_TOKENS_SENTIMENT * len(batch),
-                        timeout=30.0  # Add timeout
+                        timeout=90.0  # Add timeout (increased to 90s for stability)
                     )
                     
                     self.api_calls_made += 1
@@ -281,7 +337,19 @@ Respond in JSON format:
                     break
                     
                 except Exception as e:
-                    logger.warning(f"API error on batch {i}, attempt {attempt + 1}/{max_retries}: {e}")
+                    error_msg = str(e)
+                    logger.warning(f"API error on batch {i}, attempt {attempt + 1}/{max_retries}: {error_msg}")
+                    
+                    # Check if it's an authentication error
+                    if "authentication" in error_msg.lower() or "bearer" in error_msg.lower() or "api key" in error_msg.lower():
+                        # Recreate client with fresh API key
+                        import os
+                        api_key = config.OPENAI_API_KEY.strip() if config.OPENAI_API_KEY else ""
+                        if api_key:
+                            os.environ['OPENAI_API_KEY'] = api_key
+                            from openai import OpenAI
+                            client = OpenAI(api_key=api_key)
+                            logger.info(f"Recreated OpenAI client due to authentication error (attempt {attempt + 1})")
                     
                     if attempt < max_retries - 1:
                         # Exponential backoff
@@ -505,7 +573,7 @@ Respond in JSON format:
                 return_all_scores=True,
                 device=-1  # Use CPU
             )
-            logger.info("✓ Hugging Face classifier loaded")
+            logger.info("[OK] Hugging Face classifier loaded")
         except Exception as e:
             logger.warning(f"Could not load Hugging Face classifier: {e}")
             self.hf_classifier = None
@@ -516,7 +584,7 @@ Respond in JSON format:
         try:
             from textblob import TextBlob
             self.textblob_available = True
-            logger.info("✓ TextBlob available")
+            logger.info("[OK] TextBlob available")
         except Exception as e:
             logger.warning(f"TextBlob not available: {e}")
             self.textblob_available = False
@@ -611,7 +679,7 @@ Respond in JSON format:
         if failed_count > 0:
             logger.warning(f"Failed to analyze {failed_count} comments with HF, used fallback")
         
-        logger.info(f"✓ HF analysis complete for {len(results)} comments")
+        logger.info(f"[OK] HF analysis complete for {len(results)} comments")
         return results
     
     def _add_textblob_baseline(self, df: pd.DataFrame, results: List[Dict]) -> List[Dict]:
@@ -718,6 +786,478 @@ Respond in JSON format:
             logger.warning(f"VELOCITY ALERT: {entity} changed {percent_change:+.1f}% in {window_hours}hrs")
         
         return result
+    
+    def _call_openai_model_batch(
+        self,
+        client,
+        model_name: str,
+        comments: List[str],
+        system_prompt: str,
+    ) -> List[Dict]:
+        """
+        Call a given OpenAI chat model for a batch of comments.
+        Returns list of dicts with emotion/score/sarcasm/confidence.
+        
+        This is a generic helper used by both standard and hybrid analysis paths.
+        """
+        import json
+        import os
+        
+        api_key = config.OPENAI_API_KEY.strip() if config.OPENAI_API_KEY else ""
+        if not api_key:
+            logger.warning("OPENAI_API_KEY missing in _call_openai_model_batch; using rule-based fallback")
+            return [self._analyze_single_comment(c) for c in comments]
+        
+        os.environ["OPENAI_API_KEY"] = api_key
+        
+        if client is None:
+            from openai import OpenAI
+            client = OpenAI(api_key=api_key)
+        
+        # Build prompt
+        numbered = "\n".join(f"{i}. {c[:200]}" for i, c in enumerate(comments))
+        prompt = f"""{system_prompt}
+
+Comments:
+{numbered}
+
+Respond in strict JSON array format:
+[
+  {{"index": 0, "emotion": "excitement", "score": 0.8, "sarcastic": false, "confidence": 0.9}},
+  {{"index": 1, "emotion": "anger", "score": -0.6, "sarcastic": false, "confidence": 0.8}},
+  ...
+]"""
+
+        try:
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": "You are an expert at analyzing social media sentiment in entertainment contexts. Always return valid JSON."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.2,
+                max_tokens=config.MAX_TOKENS_SENTIMENT * max(1, len(comments)),
+                timeout=60.0,
+            )
+            
+            self.api_calls_made += 1
+            
+            # Cost tracking
+            try:
+                usage = response.usage
+                input_tokens = usage.prompt_tokens
+                output_tokens = usage.completion_tokens
+                
+                # Model-specific pricing
+                if "gpt-5-nano" in model_name.lower():
+                    # gpt-5-nano: $0.05/$0.40 per 1M tokens
+                    input_cost = input_tokens / 1_000_000 * 0.05
+                    output_cost = output_tokens / 1_000_000 * 0.40
+                elif "gpt-4o-mini" in model_name.lower():
+                    # gpt-4o-mini: $0.15/$0.60 per 1M tokens
+                    input_cost = input_tokens / 1_000_000 * 0.15
+                    output_cost = output_tokens / 1_000_000 * 0.60
+                else:
+                    # Default to gpt-4o-mini pricing for unknown models
+                    input_cost = input_tokens / 1_000_000 * 0.15
+                    output_cost = output_tokens / 1_000_000 * 0.60
+                
+                self.estimated_cost += input_cost + output_cost
+            except Exception as e:
+                logger.debug(f"No usage info available: {e}")
+            
+            raw = response.choices[0].message.content
+            items = self._parse_json_with_repair(raw)
+            
+            results = []
+            for item in items:
+                results.append({
+                    "primary_emotion": item.get("emotion", "neutral"),
+                    "sentiment_score": float(item.get("score", 0.0)),
+                    "is_sarcastic": bool(item.get("sarcastic", False)),
+                    "secondary_emotions": [],
+                    "model": model_name,
+                    "model_confidence": float(item.get("confidence", abs(float(item.get("score", 0.0))))),
+                })
+            
+            return results
+            
+        except Exception as e:
+            logger.warning(f"OpenAI API call failed for model {model_name}: {e}. Using rule-based fallback.")
+            return [self._analyze_single_comment(c) for c in comments]
+    
+    def _analyze_with_api_hybrid(self, df: pd.DataFrame, batch_size: int) -> List[Dict]:
+        """
+        Hybrid pipeline:
+          1) Run cheap model (nano) on all comments (fast, cheap).
+          2) Identify 'escalation' comments that need high-accuracy model.
+          3) Re-run only those through gpt-4o-mini and overwrite.
+        
+        This provides cost optimization while maintaining quality on important comments.
+        """
+        import math
+        
+        if df.empty:
+            return []
+        
+        comments = df["comment_text"].astype(str).tolist()
+        
+        # Ensure OpenAI key
+        if not config.OPENAI_API_KEY or config.OPENAI_API_KEY.strip() in ("", "your-openai-api-key-here"):
+            logger.warning("OPENAI_API_KEY missing; hybrid mode falling back to rule-based sentiment")
+            return self._analyze_rule_based(df)
+        
+        # Initialize client once
+        client = self.openai_client
+        if client is None:
+            try:
+                from openai import OpenAI
+                client = OpenAI(api_key=config.OPENAI_API_KEY.strip())
+                self.openai_client = client
+            except Exception as e:
+                logger.error(f"Could not init OpenAI client in hybrid path: {e}")
+                return self._analyze_rule_based(df)
+        
+        # ---------- 1) Run cheap model over everything ----------
+        nano_system_prompt = f"""Analyze each social media comment from an entertainment audience.
+For each comment, output:
+- emotion: one of {', '.join(self.emotion_categories)}
+- score: number between -1 (very negative) and +1 (very positive)
+- sarcastic: true/false
+- confidence: number between 0 and 1 for how sure you are (0=guessing, 1=very sure).
+
+IMPORTANT: You MUST output valid JSON array only. No markdown, no explanations."""
+
+        nano_results: List[Dict] = []
+        
+        for i in range(0, len(comments), batch_size):
+            batch_comments = comments[i:i+batch_size]
+            try:
+                batch_results = self._call_openai_model_batch(
+                    client=client,
+                    model_name=config.SENTIMENT_MODEL_CHEAP,
+                    comments=batch_comments,
+                    system_prompt=nano_system_prompt,
+                )
+                nano_results.extend(batch_results)
+            except Exception as e:
+                logger.warning(f"Cheap model batch {i} failed ({e}); using rule-based fallback for that slice")
+                for c in batch_comments:
+                    nano_results.append(self._analyze_single_comment(c))
+        
+        # Pad if needed
+        while len(nano_results) < len(comments):
+            nano_results.append(self._analyze_single_comment(""))
+        
+        # ---------- 2) Choose which comments to escalate ----------
+        to_escalate_indices = []
+        
+        for idx, (_, row) in enumerate(df.iterrows()):
+            res = nano_results[idx] if idx < len(nano_results) else self._analyze_single_comment("")
+            score = float(res.get("sentiment_score", 0.0))
+            confidence = float(res.get("model_confidence", abs(score)))
+            text = str(row.get("comment_text", "") or "")
+            
+            # Get likes
+            likes = row.get("likes", 0)
+            try:
+                likes = int(likes) if pd.notna(likes) else 0
+            except (ValueError, TypeError):
+                likes = 0
+            
+            # Heuristics for escalation
+            ambiguous = abs(score) < config.SENTIMENT_AMBIGUITY_BAND
+            low_conf = confidence < 0.6
+            long_comment = len(text.split()) > config.SENTIMENT_MAX_LENGTH_FOR_NANO_ONLY
+            high_impact = likes >= config.SENTIMENT_MIN_LIKES_FOR_ESCALATION
+            stan_phrase_present = any(
+                phrase in text.lower() for phrase in config.SENTIMENT_STAN_PHRASES
+            )
+            screaming = (text.isupper() and len(text) > 5) or text.count("!") >= 3
+            
+            if high_impact or stan_phrase_present or screaming or (ambiguous and low_conf) or long_comment:
+                to_escalate_indices.append(idx)
+        
+        # Apply safety cap (avoid accidentally escalating 80% of comments)
+        max_escalations = math.floor(len(comments) * config.SENTIMENT_MAX_ESCALATION_FRACTION)
+        if len(to_escalate_indices) > max_escalations:
+            logger.info(
+                f"Escalation candidates {len(to_escalate_indices)} exceed cap {max_escalations}, trimming to top {max_escalations}"
+            )
+            # Sort by importance (likes, then confidence) and take top N
+            escalation_scores = []
+            for idx in to_escalate_indices:
+                row = df.iloc[idx]
+                likes = row.get("likes", 0)
+                try:
+                    likes = int(likes) if pd.notna(likes) else 0
+                except (ValueError, TypeError):
+                    likes = 0
+                conf = nano_results[idx].get("model_confidence", 0) if idx < len(nano_results) else 0
+                escalation_scores.append((idx, likes * 1000 + conf * 100))  # Weight likes heavily
+            
+            escalation_scores.sort(key=lambda x: x[1], reverse=True)
+            to_escalate_indices = [idx for idx, _ in escalation_scores[:max_escalations]]
+        
+        logger.info(
+            f"Hybrid sentiment: {len(comments)} total, {len(to_escalate_indices)} escalated to {config.SENTIMENT_MODEL_MAIN}"
+        )
+        
+        if not to_escalate_indices:
+            # No escalation needed; tag model and return
+            for r in nano_results:
+                r["model"] = config.SENTIMENT_MODEL_CHEAP
+            return nano_results
+        
+        # ---------- 3) Run high-accuracy model on escalated subset ----------
+        escalated_comments = [comments[i] for i in to_escalate_indices]
+        
+        main_system_prompt = f"""You are analyzing social media comments for a television entertainment brand.
+For each comment, output:
+- emotion: one of {', '.join(self.emotion_categories)}
+- score: number between -1 and +1
+- sarcastic: true/false
+- confidence: 0-1
+
+Use entertainment context (stan culture, sarcasm, emojis, caps, etc.).
+IMPORTANT: Reply with valid JSON array only. No markdown."""
+
+        main_results_flat: List[Dict] = []
+        
+        for i in range(0, len(escalated_comments), batch_size):
+            batch_comments = escalated_comments[i:i+batch_size]
+            try:
+                batch_results = self._call_openai_model_batch(
+                    client=client,
+                    model_name=config.SENTIMENT_MODEL_MAIN,
+                    comments=batch_comments,
+                    system_prompt=main_system_prompt,
+                )
+                main_results_flat.extend(batch_results)
+            except Exception as e:
+                logger.error(f"High-accuracy model escalation batch failed ({e}); keeping cheap model results for that slice")
+                # Fallback: keep existing nano results, do nothing
+        
+        # Ensure we have enough results
+        while len(main_results_flat) < len(to_escalate_indices):
+            main_results_flat.append(self._analyze_single_comment(""))
+        
+        # Map high-accuracy results back onto overall array
+        for idx, result in zip(to_escalate_indices, main_results_flat):
+            if idx < len(nano_results):
+                nano_results[idx] = result  # Overwrite cheap model with high-accuracy model
+        
+        # Tag model if not already
+        for i, r in enumerate(nano_results):
+            if "model" not in r:
+                r["model"] = config.SENTIMENT_MODEL_CHEAP
+        
+        return nano_results
+    
+    def _analyze_with_batch_api(self, df: pd.DataFrame) -> List[Dict]:
+        """
+        Use OpenAI Batch API for sentiment analysis (50% cheaper, asynchronous)
+        
+        Workflow:
+        1. Create JSONL file with all requests
+        2. Upload file to OpenAI
+        3. Create batch job
+        4. Poll for completion
+        5. Download and parse results
+        
+        Note: This is asynchronous - results may take up to 24 hours, but costs 50% less
+        """
+        import tempfile
+        import os
+        from pathlib import Path
+        
+        if df.empty:
+            return []
+        
+        if not config.OPENAI_API_KEY or config.OPENAI_API_KEY.strip() == "":
+            logger.warning("OPENAI_API_KEY missing; batch API mode falling back to rule-based sentiment")
+            return self._analyze_rule_based(df)
+        
+        client = self.openai_client
+        if client is None:
+            try:
+                from openai import OpenAI
+                client = OpenAI(api_key=config.OPENAI_API_KEY.strip())
+                self.openai_client = client
+            except Exception as e:
+                logger.error(f"Could not init OpenAI client for batch API: {e}")
+                return self._analyze_rule_based(df)
+        
+        comments = df["comment_text"].astype(str).tolist()
+        model_name = config.SENTIMENT_MODEL_CHEAP  # Use cheap model for batch
+        
+        logger.info(f"Preparing batch API request for {len(comments)} comments...")
+        
+        # Step 1: Create JSONL file
+        jsonl_lines = []
+        for i, comment in enumerate(comments):
+            request = {
+                "custom_id": f"comment-{i}",
+                "method": "POST",
+                "url": "/v1/chat/completions",
+                "body": {
+                    "model": model_name,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": "You are an expert at analyzing social media sentiment in entertainment contexts. Always return valid JSON."
+                        },
+                        {
+                            "role": "user",
+                            "content": f"""Analyze this social media comment from an entertainment audience.
+
+Comment: {comment[:500]}
+
+Output JSON:
+{{"emotion": "excitement|anger|disappointment|love|disgust|surprise|fatigue|neutral", "score": -1.0 to 1.0, "sarcastic": true/false, "confidence": 0.0 to 1.0}}"""
+                        }
+                    ],
+                    "temperature": 0.2,
+                    "max_tokens": config.MAX_TOKENS_SENTIMENT
+                }
+            }
+            jsonl_lines.append(json.dumps(request))
+        
+        # Step 2: Upload file
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.jsonl', delete=False) as f:
+                f.write('\n'.join(jsonl_lines))
+                temp_file_path = f.name
+            
+            logger.info(f"Uploading batch input file ({len(jsonl_lines)} requests)...")
+            with open(temp_file_path, 'rb') as f:
+                uploaded_file = client.files.create(
+                    file=f,
+                    purpose="batch"
+                )
+            
+            os.unlink(temp_file_path)  # Clean up temp file
+            logger.info(f"File uploaded: {uploaded_file.id}")
+            
+            # Step 3: Create batch job
+            logger.info("Creating batch job...")
+            batch = client.batches.create(
+                input_file_id=uploaded_file.id,
+                endpoint="/v1/chat/completions",
+                completion_window="24h"
+            )
+            
+            logger.info(f"Batch job created: {batch.id}")
+            logger.info(f"Status: {batch.status}")
+            logger.info("Batch API jobs are processed asynchronously (up to 24 hours).")
+            logger.info("Results will be available when batch completes. Polling for completion...")
+            
+            # Step 4: Poll for completion
+            start_time = time.time()
+            while batch.status in ["validating", "in_progress"]:
+                if time.time() - start_time > config.SENTIMENT_BATCH_MAX_WAIT:
+                    logger.warning(f"Batch {batch.id} exceeded max wait time. Returning partial results.")
+                    break
+                
+                time.sleep(config.SENTIMENT_BATCH_POLL_INTERVAL)
+                batch = client.batches.retrieve(batch.id)
+                logger.info(f"Batch {batch.id} status: {batch.status}")
+            
+            if batch.status != "completed":
+                logger.error(f"Batch {batch.id} failed with status: {batch.status}")
+                logger.info("Falling back to rule-based analysis for all comments")
+                return self._analyze_rule_based(df)
+            
+            # Step 5: Download results
+            logger.info(f"Batch completed! Downloading results from {batch.output_file_id}...")
+            output_file = client.files.content(batch.output_file_id)
+            
+            # Parse results
+            results = []
+            result_map = {}
+            
+            # Parse JSONL output
+            for line in output_file.text.split('\n'):
+                if not line.strip():
+                    continue
+                try:
+                    result_data = json.loads(line)
+                    custom_id = result_data.get("custom_id", "")
+                    if result_data.get("response", {}).get("status_code") == 200:
+                        response_body = result_data["response"]["body"]
+                        if isinstance(response_body, str):
+                            response_body = json.loads(response_body)
+                        
+                        choice = response_body.get("choices", [{}])[0]
+                        message_content = choice.get("message", {}).get("content", "{}")
+                        
+                        if isinstance(message_content, str):
+                            try:
+                                sentiment_data = json.loads(message_content)
+                            except:
+                                # Fallback parsing
+                                sentiment_data = self._parse_json_with_repair(message_content)
+                                if isinstance(sentiment_data, list) and sentiment_data:
+                                    sentiment_data = sentiment_data[0]
+                        else:
+                            sentiment_data = message_content
+                        
+                        result_map[custom_id] = {
+                            "primary_emotion": sentiment_data.get("emotion", "neutral"),
+                            "sentiment_score": float(sentiment_data.get("score", 0.0)),
+                            "is_sarcastic": bool(sentiment_data.get("sarcastic", False)),
+                            "secondary_emotions": [],
+                            "model": model_name,
+                            "model_confidence": float(sentiment_data.get("confidence", 0.5)),
+                        }
+                    else:
+                        # Request failed, use fallback
+                        logger.warning(f"Request {custom_id} failed in batch, using rule-based fallback")
+                        comment_idx = int(custom_id.split('-')[1]) if '-' in custom_id else 0
+                        if comment_idx < len(comments):
+                            result_map[custom_id] = self._analyze_single_comment(comments[comment_idx])
+                except Exception as e:
+                    logger.warning(f"Error parsing batch result line: {e}")
+                    continue
+            
+            # Map results back to original order
+            for i in range(len(comments)):
+                custom_id = f"comment-{i}"
+                if custom_id in result_map:
+                    results.append(result_map[custom_id])
+                else:
+                    # Fallback for missing results
+                    results.append(self._analyze_single_comment(comments[i]))
+            
+            # Cost tracking (Batch API is 50% of regular pricing)
+            try:
+                # Estimate from batch metadata if available
+                if hasattr(batch, 'request_counts'):
+                    total_requests = batch.request_counts.get('total', len(comments))
+                    # Rough estimate: assume average tokens per request
+                    # Batch API pricing is 50% of regular
+                    estimated_input_tokens = total_requests * 100  # Rough estimate
+                    estimated_output_tokens = total_requests * 50
+                    
+                    if "gpt-5-nano" in model_name.lower():
+                        input_cost = (estimated_input_tokens / 1_000_000 * 0.05) * 0.5  # 50% discount
+                        output_cost = (estimated_output_tokens / 1_000_000 * 0.40) * 0.5
+                    else:
+                        input_cost = (estimated_input_tokens / 1_000_000 * 0.15) * 0.5
+                        output_cost = (estimated_output_tokens / 1_000_000 * 0.60) * 0.5
+                    
+                    self.estimated_cost += input_cost + output_cost
+            except Exception as e:
+                logger.debug(f"Could not estimate batch API cost: {e}")
+            
+            logger.info(f"Batch API processing complete. Processed {len(results)} comments.")
+            return results
+            
+        except Exception as e:
+            logger.error(f"Batch API processing failed: {e}. Falling back to rule-based analysis.")
+            import traceback
+            logger.debug(traceback.format_exc())
+            return self._analyze_rule_based(df)
 
 
 

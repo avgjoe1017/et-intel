@@ -1,0 +1,103 @@
+{
+  "metadata": {
+    "generated_at": "2025-11-22T21:54:21.799507",
+    "system_version": "1.0.0",
+    "config_version": "1.0",
+    "date_range": {
+      "start": "2025-11-14T19:43:21.374310",
+      "end": "2025-11-22T19:46:11.057551"
+    },
+    "total_comments": 27,
+    "platforms": [
+      "instagram"
+    ],
+    "unique_posts": 3
+  },
+  "entities": {
+    "people": [
+      [
+        "Taylor Swift",
+        3,
+        false,
+        true,
+        0
+      ],
+      [
+        "Travis Kelce",
+        3,
+        false,
+        true,
+        0
+      ],
+      [
+        "Chiefs Kingdom",
+        3,
+        false,
+        true,
+        0
+      ]
+    ],
+    "shows": [],
+    "couples": [],
+    "storylines": [
+      {
+        "storyline": "relationship",
+        "mention_count": 9,
+        "percentage": 33.33333333333333
+      }
+    ]
+  },
+  "sentiment_summary": {
+    "Taylor Swift": {
+      "type": "person",
+      "total_mentions": 3,
+      "avg_sentiment": NaN,
+      "weighted_avg_sentiment": 0.0,
+      "total_likes": 468,
+      "top_liked_comment": null,
+      "emotion_breakdown": {},
+      "intended_subject": false,
+      "organic_mentions": true
+    },
+    "Travis Kelce": {
+      "type": "person",
+      "total_mentions": 3,
+      "avg_sentiment": NaN,
+      "weighted_avg_sentiment": 0.0,
+      "total_likes": 234,
+      "top_liked_comment": null,
+      "emotion_breakdown": {},
+      "intended_subject": false,
+      "organic_mentions": true
+    },
+    "Chiefs Kingdom": {
+      "type": "person",
+      "total_mentions": 3,
+      "avg_sentiment": NaN,
+      "weighted_avg_sentiment": 0.0,
+      "total_likes": 135,
+      "top_liked_comment": null,
+      "emotion_breakdown": {},
+      "intended_subject": false,
+      "organic_mentions": true
+    }
+  },
+  "velocity_alerts": [],
+  "demographics": {
+    "platform_distribution": {
+      "instagram": 27
+    },
+    "peak_hours": {
+      "19": 27
+    },
+    "high_engagement_sentiment": NaN,
+    "low_engagement_sentiment": NaN
+  },
+  "top_storylines": [
+    {
+      "storyline": "relationship",
+      "mention_count": 9,
+      "percentage": 33.33333333333333
+    }
+  ]
+}

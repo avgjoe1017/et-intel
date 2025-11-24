@@ -1,0 +1,366 @@
+{
+  "metadata": {
+    "generated_at": "2025-11-23T14:33:08.167792",
+    "system_version": "1.0.0",
+    "config_version": "1.0",
+    "date_range": {
+      "start": "1970-01-01T00:00:01.763668",
+      "end": "2025-11-22T19:46:11.057551"
+    },
+    "total_comments": 609,
+    "platforms": [
+      "instagram"
+    ],
+    "unique_posts": 4
+  },
+  "entities": {
+    "people": [
+      [
+        "Blake Lively",
+        355,
+        false,
+        true,
+        0
+      ],
+      [
+        "Justin Baldoni",
+        93,
+        false,
+        true,
+        0
+      ],
+      [
+        "Colleen Hoover",
+        72,
+        false,
+        true,
+        0
+      ],
+      [
+        "Ryan",
+        9,
+        false,
+        true,
+        0
+      ],
+      [
+        "Verity",
+        4,
+        false,
+        true,
+        0
+      ],
+      [
+        "Taylor Swift",
+        3,
+        false,
+        true,
+        0
+      ],
+      [
+        "Travis Kelce",
+        3,
+        false,
+        true,
+        0
+      ],
+      [
+        "Chiefs Kingdom",
+        3,
+        false,
+        true,
+        0
+      ],
+      [
+        "Coleen",
+        3,
+        false,
+        true,
+        0
+      ]
+    ],
+    "shows": [],
+    "couples": [
+      [
+        "Blake",
+        "blake",
+        161,
+        "discovered"
+      ],
+      [
+        "Blake",
+        "Blake Lively",
+        29,
+        "discovered"
+      ],
+      [
+        "Blake",
+        "Ryan",
+        9,
+        "discovered"
+      ],
+      [
+        "Blake",
+        "Coleen",
+        2,
+        "discovered"
+      ],
+      [
+        "Blake",
+        "team Blake",
+        4,
+        "discovered"
+      ],
+      [
+        "blake",
+        "team Blake",
+        4,
+        "discovered"
+      ],
+      [
+        "Justin",
+        "Team Justin",
+        10,
+        "discovered"
+      ],
+      [
+        "Justin",
+        "Justin Baldoni",
+        7,
+        "discovered"
+      ],
+      [
+        "Colleen",
+        "Colleen Hoover",
+        12,
+        "discovered"
+      ],
+      [
+        "Blake Lively",
+        "blake",
+        29,
+        "discovered"
+      ],
+      [
+        "Ryan",
+        "blake",
+        9,
+        "discovered"
+      ],
+      [
+        "Coleen",
+        "blake",
+        2,
+        "discovered"
+      ],
+      [
+        "Coleen",
+        "Justin",
+        3,
+        "discovered"
+      ]
+    ],
+    "storylines": [
+      {
+        "storyline": "career",
+        "mention_count": 114,
+        "percentage": 18.7192118226601
+      },
+      {
+        "storyline": "lawsuit",
+        "mention_count": 31,
+        "percentage": 5.0903119868637114
+      },
+      {
+        "storyline": "controversy",
+        "mention_count": 21,
+        "percentage": 3.4482758620689653
+      },
+      {
+        "storyline": "relationship",
+        "mention_count": 17,
+        "percentage": 2.7914614121510675
+      }
+    ]
+  },
+  "sentiment_summary": {
+    "Blake Lively": {
+      "type": "person",
+      "total_mentions": 355,
+      "avg_sentiment": -0.455,
+      "weighted_avg_sentiment": -0.6,
+      "total_likes": 4919,
+      "top_liked_comment": {
+        "text": "Blake lively was the worst choice for lily anyways. I LOVED those books. I was so excited for the movie. Blake ruined it entirely. I liked Justin tho",
+        "likes": 4890,
+        "sentiment": -0.6
+      },
+      "emotion_breakdown": {
+        "anger": 12,
+        "neutral": 8,
+        "disappointment": 5,
+        "love": 1,
+        "sarcasm": 1,
+        "surprise": 1,
+        "disgust": 1
+      },
+      "intended_subject": false,
+      "organic_mentions": true
+    },
+    "Justin Baldoni": {
+      "type": "person",
+      "total_mentions": 93,
+      "avg_sentiment": -0.6,
+      "weighted_avg_sentiment": -0.622,
+      "total_likes": 23,
+      "top_liked_comment": {
+        "text": "Well, she should back Justin Baldoni then he\u2019s the only one that\u2019s honest!",
+        "likes": 12,
+        "sentiment": -0.5
+      },
+      "emotion_breakdown": {
+        "anger": 4,
+        "disappointment": 2,
+        "neutral": 1
+      },
+      "intended_subject": false,
+      "organic_mentions": true
+    },
+    "Colleen Hoover": {
+      "type": "person",
+      "total_mentions": 72,
+      "avg_sentiment": -0.325,
+      "weighted_avg_sentiment": -0.7,
+      "total_likes": 3,
+      "top_liked_comment": {
+        "text": "Colleen Hoover should be embarrassed for making nail polish line dedicated to domestic violence.",
+        "likes": 1,
+        "sentiment": -0.8
+      },
+      "emotion_breakdown": {
+        "disappointment": 4,
+        "disgust": 2,
+        "neutral": 2,
+        "anger": 1,
+        "sarcasm": 1,
+        "love": 1,
+        "surprise": 1
+      },
+      "intended_subject": false,
+      "organic_mentions": true
+    },
+    "Ryan": {
+      "type": "person",
+      "total_mentions": 9,
+      "avg_sentiment": -0.633,
+      "weighted_avg_sentiment": -0.733,
+      "total_likes": 115,
+      "top_liked_comment": {
+        "text": "She ruined it. She decided two snakes were the best way to go, and in doing so destroyed what once made her relatable. Don\u2019t blame others for your selfish, bad choices, Colleen. She took part in a film coup meant to destroy a man\u2019s life and reputation. Karma happened to bite her, and now she blames both of them. No\u2014blame your own greed and the snakes you aligned yourself with.\r\n\r\nThe book isn\u2019t bad; you, as the author who chose money and power over integrity, were the problem. You\u2019re pulling a J.K. Rowling right now. Your book is something you, as an author, will never live up to again\u2014because of your own choices.#collenhoover #iewu #blakelively #ryanreynolds #snakepit",
+        "likes": 67,
+        "sentiment": -0.7
+      },
+      "emotion_breakdown": {
+        "anger": 5,
+        "disappointment": 2,
+        "surprise": 1,
+        "neutral": 1
+      },
+      "intended_subject": false,
+      "organic_mentions": true
+    },
+    "Verity": {
+      "type": "person",
+      "total_mentions": 4,
+      "avg_sentiment": -0.15,
+      "weighted_avg_sentiment": -0.15,
+      "total_likes": 0,
+      "top_liked_comment": null,
+      "emotion_breakdown": {
+        "neutral": 3,
+        "disappointment": 1
+      },
+      "intended_subject": false,
+      "organic_mentions": true
+    },
+    "Coleen": {
+      "type": "person",
+      "total_mentions": 3,
+      "avg_sentiment": -0.767,
+      "weighted_avg_sentiment": -0.8,
+      "total_likes": 25,
+      "top_liked_comment": {
+        "text": "She should embarrace is to choose blake instead of a proffesional person as Justin.. shame on you Coleen. Not for the book, for your chooices in real life.",
+        "likes": 22,
+        "sentiment": -0.8
+      },
+      "emotion_breakdown": {
+        "anger": 3
+      },
+      "intended_subject": false,
+      "organic_mentions": true
+    }
+  },
+  "velocity_alerts": [],
+  "demographics": {
+    "platform_distribution": {
+      "instagram": 609
+    },
+    "peak_hours": {
+      "0": 582,
+      "19": 27
+    },
+    "high_engagement_sentiment": -0.462,
+    "low_engagement_sentiment": -0.271
+  },
+  "top_storylines": [
+    {
+      "storyline": "career",
+      "mention_count": 114,
+      "percentage": 18.7192118226601
+    },
+    {
+      "storyline": "lawsuit",
+      "mention_count": 31,
+      "percentage": 5.0903119868637114
+    },
+    {
+      "storyline": "controversy",
+      "mention_count": 21,
+      "percentage": 3.4482758620689653
+    },
+    {
+      "storyline": "relationship",
+      "mention_count": 17,
+      "percentage": 2.7914614121510675
+    }
+  ],
+  "trends": {
+    "trends": [
+      {
+        "entity": "Justin Baldoni",
+        "current": -0.6,
+        "previous": -0.422,
+        "delta": -0.178,
+        "percent_change": -42.1,
+        "trend": "DOWN"
+      },
+      {
+        "entity": "Colleen Hoover",
+        "current": -0.325,
+        "previous": -0.422,
+        "delta": 0.097,
+        "percent_change": 23.0,
+        "trend": "STABLE"
+      },
+      {
+        "entity": "Blake Lively",
+        "current": -0.455,
+        "previous": -0.422,
+        "delta": -0.033,
+        "percent_change": -7.8,
+        "trend": "STABLE"
+      }
+    ]
+  }
+}

@@ -155,7 +155,7 @@ def main():
         
         metadata = {'subject': args.subject or '', 'post_url': args.url or ''}
         df, entities = pipeline.process_new_data(args.import_csv, args.platform, metadata)
-        print(f"✓ Processed {len(df)} comments")
+        print(f"[OK] Processed {len(df)} comments")
         return
     
     if args.generate:
@@ -170,7 +170,7 @@ def main():
         brief = pipeline.generate_intelligence_brief(start_date=start_date)
         generator = IntelligenceBriefGenerator()
         pdf = generator.generate_report(brief)
-        print(f"✓ Report: {pdf}")
+        print(f"[OK] Report: {pdf}")
         return
     
     # Interactive mode if no args

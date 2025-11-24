@@ -137,13 +137,27 @@ class CommentIngester:
             post_url = df['post_url'].iloc[0] if len(df) > 0 else ''
         elif post_metadata and post_metadata.get('post_url'):
             post_url = post_metadata['post_url']
+
+        # Parse timestamps flexibly
+        timestamps = pd.to_datetime(df[col_map['timestamp']], errors='coerce')
         
+        # If parsing resulted in 1970 dates (often due to Unix timestamp being read as seconds since epoch when it's already a date string, or vice versa), try to fix
+        # Check if we have many 1970 dates
+        year_counts = timestamps.dt.year.value_counts()
+        if 1970 in year_counts and year_counts[1970] > len(df) * 0.5:
+            logger.warning("Detected 1970 timestamps. Attempting to re-parse...")
+            # Try parsing as regular string first
+            try:
+                timestamps = pd.to_datetime(df[col_map['timestamp']], format='mixed', errors='coerce')
+            except:
+                pass
+
         # Standardize columns
         standardized = pd.DataFrame({
             'platform': 'instagram',
             'username': df[col_map['username']],
             'comment_text': df[col_map['comment']],
-            'timestamp': pd.to_datetime(df[col_map['timestamp']], errors='coerce'),
+            'timestamp': timestamps,
             'likes': df[likes_col] if isinstance(likes_col, str) else likes_col,
             'post_id': self._generate_post_id(csv_path, post_metadata),
             'post_subject': post_metadata.get('subject', '') if post_metadata else '',

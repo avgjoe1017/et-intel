@@ -100,8 +100,260 @@ class EntityExtractor:
         all_entities['couples'] = couples
         all_entities['storylines'] = storylines
         
+        # Canonicalize entities (deduplicate)
+        all_entities = self.canonicalize_entities(all_entities)
+        
+        # LLM Enhancement: Further canonicalization with GPT (optional)
+        if config.USE_LLM_ENHANCEMENT and config.OPENAI_API_KEY:
+            try:
+                all_entities = self.canonicalize_with_gpt(all_entities)
+            except Exception as e:
+                logger.warning(f"LLM canonicalization failed, using rule-based results: {e}")
+        
         return all_entities
     
+    def canonicalize_entities(self, entities_dict):
+        """
+        Merge duplicate entities with fuzzy matching
+        Remove garbage entities
+        """
+        from difflib import SequenceMatcher
+        
+        # Remove garbage entities
+        GARBAGE_PATTERNS = [
+            'dataset instagram',
+            'instagram dataset',
+            'the bible',  # Unless actually relevant to content
+            'http',
+            'www.',
+        ]
+        
+        people = entities_dict.get('people', [])
+        
+        # Filter garbage
+        people = [p for p in people if not any(
+            garbage.lower() in p[0].lower() 
+            for garbage in GARBAGE_PATTERNS
+        )]
+        
+        # Team name mappings (merge team names with their associated people)
+        TEAM_MAPPINGS = {
+            'team justin': 'Justin Baldoni',
+            'team blake': 'Blake Lively',
+            'team blake lively': 'Blake Lively',
+            'team justin baldoni': 'Justin Baldoni',
+        }
+        
+        # First pass: merge team names with their people
+        merged_people = []
+        for entity in people:
+            name = entity[0]
+            name_lower = name.lower()
+            if name_lower in TEAM_MAPPINGS:
+                # Replace team name with canonical person name
+                entity_list = list(entity)
+                entity_list[0] = TEAM_MAPPINGS[name_lower]
+                merged_people.append(tuple(entity_list))
+            else:
+                merged_people.append(entity)
+        people = merged_people
+        
+        # Canonicalize (merge similar names)
+        canonical_map = {}
+        
+        for entity in people:
+            name = entity[0]
+            name_lower = name.lower()
+            
+            # Check if this is similar to existing canonical entity
+            found_match = False
+            for canonical_name in list(canonical_map.keys()):
+                canonical_lower = canonical_name.lower()
+                
+                # Check for partial name matches (e.g., "Blake" in "Blake Lively")
+                # If one name is a substring of another and both are reasonable length, merge
+                is_partial_match = False
+                if len(name) >= 3 and len(canonical_name) >= 3:
+                    if name_lower in canonical_lower or canonical_lower in name_lower:
+                        # Prefer the longer/more complete name
+                        is_partial_match = True
+                
+                similarity = SequenceMatcher(None, name_lower, canonical_lower).ratio()
+                
+                # If >80% similar OR partial match, merge
+                if similarity > 0.8 or is_partial_match:
+                    # Use the longer/more complete name as canonical
+                    if len(name) > len(canonical_name):
+                        # Update canonical
+                        old_data = canonical_map[canonical_name]
+                        # Sum mentions (index 1) and implicit counts (index 4 if exists)
+                        new_count = old_data[1] + entity[1]
+                        new_implicit = (old_data[4] if len(old_data) > 4 else 0) + (entity[4] if len(entity) > 4 else 0)
+                        
+                        # Create merged entity tuple
+                        merged_entity = list(entity)
+                        merged_entity[1] = new_count
+                        if len(merged_entity) > 4:
+                            merged_entity[4] = new_implicit
+                        elif len(merged_entity) == 4: # Convert old format to new if needed
+                             merged_entity.append(new_implicit)
+                             
+                        del canonical_map[canonical_name]
+                        canonical_map[name] = merged_entity
+                    else:
+                        # Add to existing
+                        canonical_entity = list(canonical_map[canonical_name])
+                        canonical_entity[1] += entity[1] # Sum mentions
+                        if len(canonical_entity) > 4 and len(entity) > 4:
+                            canonical_entity[4] += entity[4]
+                        canonical_map[canonical_name] = canonical_entity
+                        
+                    found_match = True
+                    break
+            
+            if not found_match:
+                canonical_map[name] = list(entity)
+        
+        # Convert back to list format and sort
+        entities_dict['people'] = sorted(list(canonical_map.values()), key=lambda x: x[1], reverse=True)
+        
+        return entities_dict
+    
+    def canonicalize_with_gpt(self, entities_dict):
+        """
+        Use GPT-4o-mini to further canonicalize entities after rule-based deduplication
+        Merges duplicates and removes garbage entities intelligently
+        
+        Cost: ~$0.001 per brief
+        """
+        if not config.OPENAI_API_KEY or not config.OPENAI_API_KEY.strip():
+            logger.warning("OpenAI API key not available for LLM canonicalization")
+            return entities_dict
+        
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=config.OPENAI_API_KEY)
+        except Exception as e:
+            logger.warning(f"Could not initialize OpenAI client for canonicalization: {e}")
+            return entities_dict
+        
+        # Extract entity names from people list
+        people_names = [entity[0] for entity in entities_dict.get('people', [])]
+        
+        if not people_names:
+            return entities_dict
+        
+        # Limit to top 50 entities to manage costs
+        people_names = people_names[:50]
+        
+        prompt = f"""These entities were extracted from Instagram comments about entertainment news. 
+Merge duplicates (e.g., "Blake" and "Blake Lively" should become "Blake Lively") and remove garbage entities (like "Dataset Instagram", "the Bible" unless actually relevant).
+
+IMPORTANT: Merge team names with their associated people:
+- "Team Justin" or "team justin" → "Justin Baldoni"
+- "Team Blake" or "team blake" → "Blake Lively"
+
+Entities: {json.dumps(people_names, indent=2)}
+
+Return JSON with only the canonical entity names (no duplicates, no garbage, no team names):
+{{"canonical_entities": ["Name1", "Name2", ...]}}"""
+
+        try:
+            response = client.chat.completions.create(
+                model=config.ENTITY_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are an expert at identifying and canonicalizing celebrity and entertainment entity names."},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.3,
+                max_tokens=config.MAX_TOKENS_ENTITY
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            canonical_names = result.get('canonical_entities', [])
+            
+            # Map original entities to canonical names (more lenient matching)
+            canonical_set = set(n.lower() for n in canonical_names)
+            filtered_entities = []
+            seen_canonical = set()
+            entity_to_canonical = {}  # Track mappings
+            
+            # First pass: exact matches
+            for entity in entities_dict.get('people', []):
+                entity_name = entity[0]
+                entity_lower = entity_name.lower()
+                
+                # Check if this entity matches a canonical name exactly
+                if entity_lower in canonical_set:
+                    canonical_match = next((n for n in canonical_names if n.lower() == entity_lower), entity_name)
+                    entity_to_canonical[entity_name] = canonical_match
+            
+            # Second pass: partial/fuzzy matches for unmatched entities
+            for entity in entities_dict.get('people', []):
+                entity_name = entity[0]
+                entity_lower = entity_name.lower()
+                
+                if entity_name in entity_to_canonical:
+                    # Already matched, skip
+                    continue
+                
+                # Try partial matching
+                best_match = None
+                best_score = 0
+                for canonical in canonical_names:
+                    can_lower = canonical.lower()
+                    # Check if one contains the other (for "Blake" -> "Blake Lively")
+                    if can_lower in entity_lower or entity_lower in can_lower:
+                        # Prefer longer/more complete name
+                        score = len(canonical)
+                        if score > best_score:
+                            best_match = canonical
+                            best_score = score
+                
+                if best_match:
+                    entity_to_canonical[entity_name] = best_match
+                else:
+                    # Keep original if no match found
+                    entity_to_canonical[entity_name] = entity_name
+            
+            # Build filtered list with canonical names
+            for entity in entities_dict.get('people', []):
+                entity_name = entity[0]
+                canonical_name = entity_to_canonical.get(entity_name, entity_name)
+                canonical_lower = canonical_name.lower()
+                
+                if canonical_lower not in seen_canonical:
+                    # Update entity name to canonical form
+                    updated_entity = list(entity)
+                    updated_entity[0] = canonical_name
+                    filtered_entities.append(tuple(updated_entity))
+                    seen_canonical.add(canonical_lower)
+                else:
+                    # Merge with existing canonical entity (sum counts)
+                    for i, existing in enumerate(filtered_entities):
+                        if existing[0].lower() == canonical_lower:
+                            merged = list(existing)
+                            merged[1] += entity[1]  # Sum mentions
+                            if len(merged) > 4 and len(entity) > 4:
+                                merged[4] += entity[4]  # Sum implicit counts
+                            filtered_entities[i] = tuple(merged)
+                            break
+            
+            # Safety check: if we lost more than 30% of entities, something went wrong
+            if len(filtered_entities) < len(entities_dict.get('people', [])) * 0.7:
+                logger.warning(f"LLM canonicalization reduced entities from {len(entities_dict.get('people', []))} to {len(filtered_entities)}, using original list")
+                return entities_dict
+            
+            entities_dict['people'] = sorted(filtered_entities, key=lambda x: x[1], reverse=True)
+            logger.info(f"LLM canonicalization: {len(people_names)} -> {len(canonical_names)} entities")
+            
+        except Exception as e:
+            logger.warning(f"LLM canonicalization failed: {e}. Using rule-based results.")
+            return entities_dict
+        
+        return entities_dict
+
     def _extract_from_subjects(self, df: pd.DataFrame) -> Dict:
         """Extract entities from post subjects/titles"""
         entities = {'people': [], 'shows': []}
@@ -170,14 +422,14 @@ class EntityExtractor:
             # Try to load the large model, fallback to medium or small
             try:
                 self.nlp = spacy.load("en_core_web_lg")
-                logger.info("✓ Loaded spaCy en_core_web_lg model")
+                logger.info("[OK] Loaded spaCy en_core_web_lg model")
             except OSError:
                 try:
                     self.nlp = spacy.load("en_core_web_md")
-                    logger.info("✓ Loaded spaCy en_core_web_md model")
+                    logger.info("[OK] Loaded spaCy en_core_web_md model")
                 except OSError:
                     self.nlp = spacy.load("en_core_web_sm")
-                    logger.info("✓ Loaded spaCy en_core_web_sm model")
+                    logger.info("[OK] Loaded spaCy en_core_web_sm model")
         except Exception as e:
             logger = __import__('logging').getLogger(__name__)
             logger.warning(f"spaCy not available: {e}. Install with: python -m spacy download en_core_web_lg")

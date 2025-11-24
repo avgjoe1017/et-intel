@@ -1,0 +1,183 @@
+{
+  "people": [
+    [
+      "Harry",
+      138,
+      false,
+      true,
+      0
+    ],
+    [
+      "Megs",
+      90,
+      false,
+      true,
+      0
+    ],
+    [
+      "Meghan",
+      75,
+      false,
+      true,
+      0
+    ],
+    [
+      "Dutchess",
+      48,
+      false,
+      true,
+      0
+    ],
+    [
+      "Diana",
+      11,
+      false,
+      true,
+      0
+    ],
+    [
+      "William",
+      7,
+      false,
+      true,
+      0
+    ],
+    [
+      "Meghan Markle",
+      4,
+      false,
+      true,
+      0
+    ],
+    [
+      "Poor Harry",
+      4,
+      false,
+      true,
+      0
+    ],
+    [
+      "Yuck",
+      3,
+      false,
+      true,
+      0
+    ]
+  ],
+  "shows": [],
+  "couples": [
+    [
+      "Meg",
+      "Meghan",
+      106,
+      "discovered"
+    ],
+    [
+      "Meg",
+      "Meghan Markle",
+      8,
+      "discovered"
+    ],
+    [
+      "Meg",
+      "Megan",
+      44,
+      "discovered"
+    ],
+    [
+      "Meg",
+      "Megs",
+      10,
+      "discovered"
+    ],
+    [
+      "Harry",
+      "harry",
+      138,
+      "discovered"
+    ],
+    [
+      "Harry",
+      "Megan",
+      16,
+      "discovered"
+    ],
+    [
+      "Harry",
+      "William",
+      8,
+      "discovered"
+    ],
+    [
+      "Harry",
+      "Poor Harry",
+      8,
+      "discovered"
+    ],
+    [
+      "Meghan",
+      "Meghan Markle",
+      8,
+      "discovered"
+    ],
+    [
+      "Megan",
+      "harry",
+      16,
+      "discovered"
+    ],
+    [
+      "Diana",
+      "Harry",
+      14,
+      "discovered"
+    ],
+    [
+      "Diana",
+      "harry",
+      14,
+      "discovered"
+    ],
+    [
+      "Diana",
+      "Meg",
+      12,
+      "discovered"
+    ],
+    [
+      "Diana",
+      "Megan",
+      8,
+      "discovered"
+    ],
+    [
+      "William",
+      "harry",
+      8,
+      "discovered"
+    ],
+    [
+      "Poor Harry",
+      "harry",
+      8,
+      "discovered"
+    ]
+  ],
+  "storylines": [
+    {
+      "storyline": "relationship",
+      "mention_count": 33,
+      "percentage": 2.2372881355932206
+    },
+    {
+      "storyline": "controversy",
+      "mention_count": 6,
+      "percentage": 0.4067796610169492
+    },
+    {
+      "storyline": "career",
+      "mention_count": 6,
+      "percentage": 0.4067796610169492
+    }
+  ]
+}

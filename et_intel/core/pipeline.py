@@ -280,6 +280,14 @@ class ETIntelligencePipeline:
             'top_storylines': entities['storylines'][:5]
         }
         
+        # Calculate trends (compare to previous period)
+        logger.info("Calculating trends...")
+        try:
+            brief['trends'] = self.calculate_trends(brief, config.DB_DIR / "et_intelligence.db")
+        except Exception as e:
+            logger.warning(f"Could not calculate trends: {e}")
+            brief['trends'] = {'trends': [], 'note': str(e)}
+        
         # Save brief
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         brief_path = config.REPORTS_DIR / f"intelligence_brief_{timestamp}.json"
@@ -289,6 +297,72 @@ class ETIntelligencePipeline:
         logger.info(f"Intelligence Brief saved to {brief_path}")
         
         return brief
+
+    def calculate_trends(self, current_brief, db_path):
+        """
+        Compare current period to previous period
+        Show what's trending up/down
+        """
+        import sqlite3
+        
+        conn = sqlite3.connect(db_path)
+        
+        # Get date range from current brief
+        current_start = pd.to_datetime(current_brief['metadata']['date_range']['start'])
+        current_end = pd.to_datetime(current_brief['metadata']['date_range']['end'])
+        period_length = (current_end - current_start).days
+        
+        # Ensure minimum period length (e.g. 1 day) to avoid zero-day errors
+        if period_length < 1:
+            period_length = 1
+        
+        # Get previous period
+        prev_end = current_start
+        prev_start = prev_end - pd.Timedelta(days=period_length)
+        
+        # Query previous period data
+        query = f"""
+        SELECT mentioned_entities, sentiment_score, likes
+        FROM comments
+        WHERE timestamp BETWEEN '{prev_start}' AND '{prev_end}'
+        AND mentioned_entities != ''
+        """
+        
+        try:
+            prev_df = pd.read_sql(query, conn)
+        except Exception as e:
+            logger.warning(f"Error querying historical data: {e}")
+            conn.close()
+            return {"trends": [], "note": "Error querying historical data"}
+            
+        conn.close()
+        
+        if len(prev_df) == 0:
+            return {"trends": [], "note": "No historical data for comparison"}
+        
+        # Calculate previous period sentiment for each entity
+        trends = []
+        for entity, current_data in current_brief['sentiment_summary'].items():
+            # Find entity in previous data (simple string match for speed)
+            prev_mentions = prev_df[prev_df['mentioned_entities'].str.contains(entity, na=False, case=False)]
+            
+            if len(prev_mentions) > 5:
+                prev_sentiment = prev_mentions['sentiment_score'].mean()
+                current_sentiment = current_data['avg_sentiment']
+                
+                delta = current_sentiment - prev_sentiment
+                percent_change = (delta / abs(prev_sentiment)) * 100 if prev_sentiment != 0 else 0
+                
+                trends.append({
+                    'entity': entity,
+                    'current': round(current_sentiment, 3),
+                    'previous': round(prev_sentiment, 3),
+                    'delta': round(delta, 3),
+                    'percent_change': round(percent_change, 1),
+                    'trend': 'UP' if delta > 0.1 else 'DOWN' if delta < -0.1 else 'STABLE'
+                })
+        
+        return {"trends": sorted(trends, key=lambda x: abs(x['delta']), reverse=True)}
     
     def _tag_comments_with_entities(self, df: pd.DataFrame, entities: Dict) -> pd.DataFrame:
         """Tag each comment with entities mentioned (explicit and implicit)"""
@@ -302,7 +376,26 @@ class ETIntelligencePipeline:
             post_caption = str(row.get('post_caption', '')).lower()
             
             # Explicit mentions (name appears in comment)
-            mentioned_people = [p for p in people if p.lower() in text]
+            # Check for exact matches first, then partial matches for multi-word names
+            mentioned_people = []
+            for p in people:
+                p_lower = p.lower()
+                # Exact match
+                if p_lower in text:
+                    mentioned_people.append(p)
+                elif ' ' in p:  # Multi-word name - check for first name as word boundary
+                    # Only match if first name is substantial (>=4 chars) and appears as whole word
+                    # Increased threshold from 3 to 4 to reduce false positives (e.g., "Blake" matching "Blake Lively")
+                    first_name = p.split()[0].lower()
+                    if len(first_name) >= 4:  # More conservative - only match longer first names
+                        import re
+                        # Match first name as whole word, but avoid false positives
+                        # Only match if it's clearly referring to the person (capitalized or in context)
+                        if re.search(rf'\b{first_name}\b', text):
+                            # Additional check: if there are other people with same first name, be more careful
+                            # For now, trust the match but this could be improved
+                            mentioned_people.append(p)
+            
             mentioned_shows = [s for s in shows if s.lower() in text]
             
             # Implicit mentions (post context - comment is about post subject)
@@ -362,48 +455,86 @@ class ETIntelligencePipeline:
                     person, total_count, intended, organic, implicit_count = entity_tuple
                 else:
                     person, count, intended, organic = entity_tuple
+                    total_count = count
                     implicit_count = 0
-            person_comments = df[
-                df['comment_text'].str.contains(person, case=False, na=False)
-            ]
+            # Find comments mentioning this entity
+            # Only count EXPLICIT mentions for likes calculation (not implicit mentions from post context)
+            # This prevents inflating likes from comments that don't actually mention the entity
+            if 'mentioned_entities' in df.columns:
+                # Check if person is in the mentioned_entities dict/list
+                def mentions_person_explicit(row):
+                    entities = row.get('mentioned_entities', {})
+                    if isinstance(entities, dict):
+                        # Check explicit mentions only (not implicit)
+                        explicit_people = entities.get('explicit_people', [])
+                        all_people = entities.get('people', [])
+                        # Prefer explicit, but fall back to all if explicit not available
+                        people_list = explicit_people if explicit_people else all_people
+                        return person in people_list
+                    elif isinstance(entities, str):
+                        # Try to parse as JSON
+                        try:
+                            entities = json.loads(entities)
+                            if isinstance(entities, dict):
+                                explicit_people = entities.get('explicit_people', [])
+                                all_people = entities.get('people', [])
+                                people_list = explicit_people if explicit_people else all_people
+                                return person in people_list
+                        except:
+                            # Fallback: check if person name appears in comment text (exact match)
+                            comment_text = str(row.get('comment_text', '')).lower()
+                            return person.lower() in comment_text
+                    return False
+                
+                person_comments = df[df.apply(mentions_person_explicit, axis=1)]
+            else:
+                # Fallback: search in comment text (exact match only, no partial matching)
+                person_comments = df[
+                    df['comment_text'].str.contains(rf'\b{person}\b', case=False, na=False, regex=True)
+                ]
             
             if len(person_comments) > 0:
                 # Calculate weighted sentiment (weighted by likes)
                 total_likes = person_comments['likes'].sum() if 'likes' in person_comments.columns else 0
                 weighted_avg = None
-                if 'weighted_sentiment' in person_comments.columns and total_likes > 0:
-                    # Weighted average: sum of weighted_sentiment / sum of likes (normalized)
+                if total_likes > 0:
+                    # Proper weighted average: sum(sentiment * likes) / sum(likes)
+                    # This gives more weight to highly-liked comments
                     weighted_avg = round(
-                        person_comments['weighted_sentiment'].sum() / 
-                        (1 + person_comments['likes'].sum()) if total_likes > 0 
-                        else person_comments['sentiment_score'].mean(), 
+                        (person_comments['sentiment_score'] * person_comments['likes']).sum() / total_likes,
                         3
                     )
                 else:
-                    # Fallback: calculate from sentiment_score and likes
-                    if total_likes > 0:
-                        weighted_avg = round(
-                            (person_comments['sentiment_score'] * (1 + person_comments['likes'])).sum() / 
-                            (1 + total_likes), 
-                            3
-                        )
-                    else:
-                        weighted_avg = round(person_comments['sentiment_score'].mean(), 3)
+                    # No likes data, use simple average
+                    weighted_avg = round(person_comments['sentiment_score'].mean(), 3)
                 
                 # Find top liked comment
                 top_liked_comment = None
                 if 'likes' in person_comments.columns and len(person_comments) > 0:
                     top_liked = person_comments.nlargest(1, 'likes')
                     if len(top_liked) > 0 and top_liked['likes'].iloc[0] > 0:
-                        top_liked_comment = {
-                            'text': top_liked['comment_text'].iloc[0],
-                            'likes': int(top_liked['likes'].iloc[0]),
-                            'sentiment': round(float(top_liked['sentiment_score'].iloc[0]), 3)
-                        }
+                        sentiment_val = top_liked['sentiment_score'].iloc[0]
+                        if sentiment_val is not None and pd.notna(sentiment_val):
+                            top_liked_comment = {
+                                'text': top_liked['comment_text'].iloc[0],
+                                'likes': int(top_liked['likes'].iloc[0]),
+                                'sentiment': round(float(sentiment_val), 3)
+                            }
+                
+                # Use explicit comment count as source of truth (comments that actually mention the entity)
+                # The entity extraction count includes implicit mentions (all comments on posts about the entity),
+                # which inflates the count. We want explicit mentions only for accurate reporting.
+                explicit_mention_count = len(person_comments)
+                
+                # Log if there's a significant discrepancy (for debugging)
+                entity_extraction_count = total_count if 'total_count' in locals() else explicit_mention_count
+                if abs(explicit_mention_count - entity_extraction_count) > entity_extraction_count * 0.3:  # More than 30% difference
+                    logger.debug(f"Entity mention count for {person}: explicit={explicit_mention_count}, extraction_total={entity_extraction_count}, implicit={implicit_count if 'implicit_count' in locals() else 'N/A'}")
+                    logger.debug(f"  - Using explicit count ({explicit_mention_count}) for report accuracy")
                 
                 summary[person] = {
                     'type': 'person',
-                    'total_mentions': len(person_comments),
+                    'total_mentions': explicit_mention_count,  # Use explicit comment count (more accurate)
                     'avg_sentiment': round(person_comments['sentiment_score'].mean(), 3),
                     'weighted_avg_sentiment': weighted_avg,
                     'total_likes': int(total_likes),
@@ -430,37 +561,33 @@ class ETIntelligencePipeline:
                 # Calculate weighted sentiment (weighted by likes)
                 total_likes = show_comments['likes'].sum() if 'likes' in show_comments.columns else 0
                 weighted_avg = None
-                if 'weighted_sentiment' in show_comments.columns and total_likes > 0:
+                if total_likes > 0:
+                    # Proper weighted average: sum(sentiment * likes) / sum(likes)
+                    # This gives more weight to highly-liked comments
                     weighted_avg = round(
-                        show_comments['weighted_sentiment'].sum() / 
-                        (1 + show_comments['likes'].sum()) if total_likes > 0 
-                        else show_comments['sentiment_score'].mean(), 
+                        (show_comments['sentiment_score'] * show_comments['likes']).sum() / total_likes,
                         3
                     )
                 else:
-                    if total_likes > 0:
-                        weighted_avg = round(
-                            (show_comments['sentiment_score'] * (1 + show_comments['likes'])).sum() / 
-                            (1 + total_likes), 
-                            3
-                        )
-                    else:
-                        weighted_avg = round(show_comments['sentiment_score'].mean(), 3)
+                    # No likes data, use simple average
+                    weighted_avg = round(show_comments['sentiment_score'].mean(), 3)
                 
                 # Find top liked comment
                 top_liked_comment = None
                 if 'likes' in show_comments.columns and len(show_comments) > 0:
                     top_liked = show_comments.nlargest(1, 'likes')
                     if len(top_liked) > 0 and top_liked['likes'].iloc[0] > 0:
-                        top_liked_comment = {
-                            'text': top_liked['comment_text'].iloc[0],
-                            'likes': int(top_liked['likes'].iloc[0]),
-                            'sentiment': round(float(top_liked['sentiment_score'].iloc[0]), 3)
-                        }
+                        sentiment_val = top_liked['sentiment_score'].iloc[0]
+                        if sentiment_val is not None and pd.notna(sentiment_val):
+                            top_liked_comment = {
+                                'text': top_liked['comment_text'].iloc[0],
+                                'likes': int(top_liked['likes'].iloc[0]),
+                                'sentiment': round(float(sentiment_val), 3)
+                            }
                 
                 summary[show] = {
                     'type': 'show',
-                    'total_mentions': len(show_comments),
+                    'total_mentions': len(show_comments),  # Use explicit comment count (more accurate)
                     'avg_sentiment': round(show_comments['sentiment_score'].mean(), 3),
                     'weighted_avg_sentiment': weighted_avg,
                     'total_likes': int(total_likes),
